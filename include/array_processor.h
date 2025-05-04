@@ -1,6 +1,4 @@
-#ifndef ARRAY_PROCESSOR_H
-#define ARRAY_PROCESSOR_H
-
+#pragma once
 #include <vector>
 #include <windows.h>
 #include <stdexcept>
@@ -42,5 +40,3 @@ private:
 
     static ThreadResults results;
 };
-
-#endif //ARRAY_PROCESSOR_H

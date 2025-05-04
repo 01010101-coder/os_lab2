@@ -1,99 +1,81 @@
-#include <vector>
-#include <iostream>
-#include <cmath>
-#include <mutex>
-#include <thread>
+#include "../include/array_processor.h"
 #include <algorithm>
 #include <numeric>
-#include <stdexcept>
+#include <iostream>
+#include <cmath>
 #include <iomanip>
 
-class ArrayProcessor {
-public:
-    struct ProcessResults {
-        int minimum;
-        int maximum;
-        int avg;
-    };
+std::mutex ArrayProcessor::console_mutex;
 
-private:
-    static std::mutex print_mutex;
-    static ProcessResults computation_results;
+ArrayProcessor::ThreadResults ArrayProcessor::results;
 
-public:
-    static void ValidateArray(const std::vector<int>& data);
-    static void ProcessArray(std::vector<int>& data);
-
-private:
-    static void FindMinMax(const std::vector<int>& data);
-    static void CalculateAverage(const std::vector<int>& data);
-};
-
-std::mutex ArrayProcessor::print_mutex;
-ArrayProcessor::ProcessResults ArrayProcessor::computation_results;
-
-void ArrayProcessor::ValidateArray(const std::vector<int>& data) {
-    if (data.empty()) {
-        throw std::invalid_argument("Array cannot be empty");
+void ArrayProcessor::ValidateArray(const std::vector<int>& arr) {
+    if (arr.empty()) {
+        throw EmptyArrayException();
     }
 }
 
-void ArrayProcessor::FindMinMax(const std::vector<int>& data) {
-    int min_value = data[0], max_value = data[0];
+DWORD WINAPI ArrayProcessor::FindMinMaxThread(LPVOID lpParam) {
+    auto* arr = reinterpret_cast<std::vector<int>*>(lpParam);
+    int min = (*arr)[0], max = (*arr)[0];
 
-    for (int num : data) {
-        if (num < min_value) min_value = num;
-        if (num > max_value) max_value = num;
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    for (int num : *arr) {
+        if (num < min) min = num;
+        if (num > max) max = num;
+        Sleep(kMinMaxSleepMs);
     }
 
     {
-        std::lock_guard<std::mutex> lock(print_mutex);
-        std::cout << "Min value: " << min_value << ", Max value: " << max_value << std::endl;
+        std::lock_guard<std::mutex> lock(console_mutex);
+        std::cout << "Min: " << min << "\nMax: " << max << std::endl;
     }
 
-    computation_results.minimum = min_value;
-    computation_results.maximum = max_value;
+    results.min = min;
+    results.max = max;
+    return 0;
 }
 
-void ArrayProcessor::CalculateAverage(const std::vector<int>& data) {
-    double sum = std::accumulate(data.begin(), data.end(), 0.0);
-    double average = sum / data.size();
-    int rounded_avg = static_cast<int>(std::round(average));
+DWORD WINAPI ArrayProcessor::CalculateAverageThread(LPVOID lpParam) {
+    auto* arr = reinterpret_cast<std::vector<int>*>(lpParam);
+    double sum = 0;
+
+    for (int num : *arr) {
+        sum += num;
+        Sleep(kAverageSleepMs);
+    }
+
+    double average = sum / arr->size();
+    int roundedAverage = static_cast<int>(std::round(average));
 
     {
-        std::lock_guard<std::mutex> lock(print_mutex);
-        std::cout << "Average value: " << std::fixed << std::setprecision(2) << average
-                  << " (rounded: " << rounded_avg << ")" << std::endl;
+        std::lock_guard<std::mutex> lock(console_mutex);
+        std::cout << "Average: " << std::fixed << std::setprecision(2) << average
+            << " (rounded to " << roundedAverage << ")" << std::endl;
     }
 
-    computation_results.avg = rounded_avg;
+    results.average = roundedAverage;
+    return 0;
 }
 
-void ArrayProcessor::ProcessArray(std::vector<int>& data) {
-    ValidateArray(data);
+void ArrayProcessor::ProcessArray(std::vector<int>& arr) {
+    ValidateArray(arr);
 
-    std::thread min_max_thread(FindMinMax, std::ref(data));
-    std::thread avg_thread(CalculateAverage, std::ref(data));
+    HANDLE hMinMax = CreateThread(nullptr, 0, FindMinMaxThread, &arr, 0, nullptr);
+    HANDLE hAverage = CreateThread(nullptr, 0, CalculateAverageThread, &arr, 0, nullptr);
 
-    min_max_thread.join();
-    avg_thread.join();
+    if (hMinMax == nullptr || hAverage == nullptr) {
+        throw std::runtime_error("Failed to create threads");
+    }
 
-    for (int& num : data) {
-        if (num == computation_results.minimum || num == computation_results.maximum) {
-            num = computation_results.avg;
+    WaitForSingleObject(hMinMax, INFINITE);
+    WaitForSingleObject(hAverage, INFINITE);
+
+    CloseHandle(hMinMax);
+    CloseHandle(hAverage);
+
+    for (int& num : arr) {
+        if (num == results.min || num == results.max) {
+            num = results.average;
         }
     }
-}
-
-int main() {
-    std::vector<int> arr = {1, 4, 2, 8, 5, 3};
-
-    try {
-        ArrayProcessor::ProcessArray(arr);
-    } catch (const std::exception& e) {
-        std::cout << "Error: " << e.what() << std::endl;
-    }
-
-    return 0;
 }
